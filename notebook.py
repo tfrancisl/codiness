@@ -46,6 +46,67 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    rescan = mo.ui.button(label="Rescan results")
+    return (rescan,)
+
+
+@app.cell
+def _(mo, rescan):
+    rescan.value  # re-run when the button is pressed
+
+    _results = mo.notebook_dir() / "results"
+    run_files = {p.stem.removeprefix("eval-"): p for p in sorted(_results.glob("eval-*.jsonl"))}
+
+    saved_runs = mo.ui.multiselect(
+        options=list(reversed(run_files)),
+        value=list(run_files)[-1:],
+        label="Saved runs",
+    )
+    mo.vstack([
+        mo.md("## Saved eval runs (overlaid on the answers below)"),
+        mo.hstack([saved_runs, rescan], justify="start", align="end"),
+    ])
+    return run_files, saved_runs
+
+
+@app.cell
+def _(json, run_files, saved_runs):
+    saved_run_rows = {
+        run_id: [json.loads(line) for line in run_files[run_id].read_text().splitlines()]
+        for run_id in saved_runs.value
+    }
+    return (saved_run_rows,)
+
+
+@app.cell
+def _(
+    example_picker,
+    labels,
+    make_run_meta,
+    model_picker,
+    question_stats,
+    questions,
+    saved_run_rows,
+):
+    # The most recent selected saved run that has the chosen model, for the display above
+    overlay = None
+    for _run_id in sorted(saved_run_rows, reverse=True):
+        _rows = [r for r in saved_run_rows[_run_id] if r["model"] == model_picker.value]
+        if _rows:
+            _now = make_run_meta(questions, labels)
+            overlay = {
+                "run_id": _run_id,
+                "rows": {r["question"]: r for r in _rows if r["example"] == example_picker.value},
+                "stats": question_stats(_rows, labels, questions),
+                "stale": (_rows[0]["questions_sha"], _rows[0]["labels_sha"])
+                != (_now["questions_sha"], _now["labels_sha"]),
+            }
+            break
+    return (overlay,)
+
+
+@app.cell
 def _():
     language_by_suffix = {
         ".py": "Python",
@@ -63,6 +124,9 @@ def _():
         ".jl": "Julia",
         ".nix": "Nix",
         ".ml": "OCaml",
+        ".go": "Go",
+        ".rb": "Ruby",
+        ".ts": "TypeScript",
     }
     _fence_tags = {"Bash": "bash", "C#": "csharp", "C++": "cpp"}
 
@@ -137,6 +201,70 @@ def _():
             "reads_environment": _yes_no("Does this code read environment variables or the system clock?"),
             "destructive": _yes_no("Can this code permanently destroy or delete data?"),
         },
+        "Complexity": {
+            "algorithmic_complexity": {
+                "type": "choice",
+                "instructions": "How does the running time grow with the size of the data it processes?",
+                "criteria": {
+                    "constant": "takes the same time whatever the input size",
+                    "linear": "time grows in proportion to the input size",
+                    "linearithmic": "time grows like n log n, as in efficient sorting",
+                    "quadratic_or_worse": "nested passes over the input, or worse",
+                    "io_bound": "dominated by files, network, databases or other processes rather than computation",
+                },
+            },
+            "has_loops": _yes_no(
+                "Does this code contain an explicit loop or comprehension (for, while, repeat, list comprehension)?"
+            ),
+            "recursion": _yes_no("Does any function in this code call itself?"),
+            "nesting_depth": {
+                "type": "score",
+                "instructions": "How deeply nested are the branches, loops and try blocks?",
+                "criteria": ["flat", "one level", "two levels", "three or more levels"],
+            },
+            "readability": {
+                "type": "score",
+                "instructions": "How easy is this code to read and follow?",
+                "criteria": [
+                    "immediately clear",
+                    "clear with some effort",
+                    "hard to follow",
+                    "very hard to follow",
+                ],
+            },
+        },
+        "Robustness": {
+            "crashes_on_bad_input": _yes_no(
+                "Can empty, missing or malformed input make this code raise an unhandled error or abort?"
+            ),
+            "swallows_errors": _yes_no("Does this code catch errors and ignore them or carry on silently?"),
+            "builds_from_input": _yes_no(
+                "Does this code build a shell command, SQL query or file path from input without sanitizing it?"
+            ),
+        },
+        "Context": {
+            "code_role": {
+                "type": "choice",
+                "instructions": "What role does this code play?",
+                "criteria": {
+                    "pure_logic": "computes a result from its inputs without touching the outside world",
+                    "io_glue": "moves data between files, the network, databases or other processes",
+                    "entry_point": "the top-level program, command or request handler that is run directly",
+                    "stateful_component": "keeps state across calls in objects, modules or globals",
+                    "maintenance_task": "cleans up, backs up or deletes resources",
+                    "configuration": "declares configuration or build definitions",
+                },
+            },
+            "dependency_level": {
+                "type": "choice",
+                "instructions": "How much does this code depend on libraries outside the language's standard library?",
+                "criteria": {
+                    "stdlib_only": "uses only the language's standard library",
+                    "common_libraries": "uses widely available third-party libraries",
+                    "heavy_framework": "depends on a large framework, such as a web or machine learning framework",
+                },
+            },
+        },
         "Assessment": {
             "purity": {
                 "type": "score",
@@ -189,6 +317,9 @@ def _(example_picker, examples, mo):
         ".jl": "julia",
         ".nix": "nix",
         ".ml": "ocaml",
+        ".go": "go",
+        ".rb": "ruby",
+        ".ts": "typescript",
     }
     _suffix = "." + example_picker.value.rsplit(".", 1)[-1]
 
@@ -213,7 +344,7 @@ def _(example_picker, message, model_picker, questions, router, with_language):
 
 
 @app.cell
-def _(mo, question_groups, result):
+def _(mo, model_picker, overlay, question_groups, result):
     import html
 
     _CSS = """
@@ -224,6 +355,7 @@ def _(mo, question_groups, result):
     .lm h3 .lm-flag { text-transform: none; letter-spacing: 0; margin-left: 0.5rem; color: #d97706; opacity: 1; }
     .lm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 0.2rem 1rem; align-items: center;
               padding: 0.4rem 0; border-bottom: 1px solid color-mix(in srgb, currentColor 10%, transparent); }
+    .lm.has-eval .lm-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.1fr); }
     .lm-q code { display: block; font-size: 0.72rem; opacity: 0.55; background: none; padding: 0; }
     .lm-line { display: flex; align-items: center; gap: 0.6rem; }
     .lm-meter { flex: 1; min-width: 4rem; height: 0.5rem; border-radius: 0.25rem; overflow: hidden;
@@ -233,7 +365,12 @@ def _(mo, question_groups, result):
     .lm-val { min-width: 10rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .lm-chips { font-size: 0.72rem; opacity: 0.6; margin-top: 0.15rem; }
     .lm-chips span { margin-right: 0.6rem; }
-    @media (max-width: 640px) { .lm-row { grid-template-columns: 1fr; } .lm-val { min-width: 0; } }
+    .lm-eval { font-size: 0.85rem; }
+    .lm-ok { color: #16a34a; font-weight: 600; }
+    .lm-miss { color: #dc2626; font-weight: 600; }
+    .lm-note { opacity: 0.7; margin-bottom: 0.5rem; }
+    .lm-note .lm-flag { color: #d97706; }
+    @media (max-width: 640px) { .lm-row, .lm.has-eval .lm-row { grid-template-columns: 1fr; } .lm-val { min-width: 0; } }
     </style>
     """
 
@@ -251,10 +388,41 @@ def _(mo, question_groups, result):
         )
 
 
+    def _expected(question, truth):
+        if question["type"] == "noul":
+            return "yes" if truth else "no"
+        if question["type"] == "score":
+            return question["criteria"][truth]
+        return str(truth)
+
+
+    def _eval_cell(key, question):
+        """What the loaded eval says about this question: the label, the verdict, and its track record."""
+        row = overlay["rows"].get(key)
+        if row is None:
+            return '<div class="lm-eval"></div>'
+        mark = '<span class="lm-ok">&#10003;</span>' if row["hit"] else '<span class="lm-miss">&#10007;</span>'
+        stat = overlay["stats"].get(key)
+        bits = []
+        if stat:
+            bits.append(f"hit {_pct(stat['hit rate'])} vs {_pct(stat['baseline'])} baseline")
+            if stat["AUC"] is not None:
+                bits.append(f"AUC {stat['AUC']:.2f}")
+            if stat["Spearman"] is not None:
+                bits.append(f"&rho; {stat['Spearman']:.2f}")
+            if stat["yes labels"] is not None:
+                bits.append(f"{stat['yes labels']} of {stat['n']} yes")
+        return (
+            f'<div class="lm-eval"><div>{mark} expected <b>{html.escape(_expected(question, row["truth"]))}</b></div>'
+            f'<div class="lm-chips">{" &middot; ".join(bits)}</div></div>'
+        )
+
+
     def _row(key, question, body):
+        extra = _eval_cell(key, question) if overlay else ""
         return (
             f'<div class="lm-row"><div class="lm-q">{html.escape(question["instructions"])}'
-            f"<code>{key}</code></div><div>{body}</div></div>"
+            f"<code>{key}</code></div><div>{body}</div>{extra}</div>"
         )
 
 
@@ -286,10 +454,17 @@ def _(mo, question_groups, result):
 
     _routing = result["routing"]
     _header = f'<div class="lm-route">Model <b>{_routing["model"]}</b> · {html.escape(_routing["reason"])}</div>'
+    if overlay:
+        _stale = ' <span class="lm-flag">(this run used different questions or labels)</span>' if overlay["stale"] else ""
+        _header += (
+            f'<div class="lm-note">Eval overlay: run <b>{overlay["run_id"]}</b>, model <b>{html.escape(model_picker.value)}</b>'
+            f"{_stale}</div>"
+        )
     _body = "".join(_section(title, group) for title, group in question_groups.items())
+    _classes = "lm has-eval" if overlay else "lm"
 
     mo.vstack([
-        mo.Html(f'{_CSS}<div class="lm">{_header}{_body}</div>'),
+        mo.Html(f'{_CSS}<div class="{_classes}">{_header}{_body}</div>'),
         mo.accordion({"Raw result": mo.json(result)}),
     ])
     return
@@ -510,56 +685,104 @@ def _(json, laya, mo, with_language):
                     "examples": len(names),
                     "spearman": None if rho is None else round(rho, 2),
                     "AUC (impure vs pure)": None if area is None else round(area, 2),
+                    "mean abs error": (
+                        round(sum(abs(s - t) for s, t in zip(scores, truth)) / len(truth), 2)
+                        if signal == "direct purity score"
+                        else None
+                    ),
                 })
         return table
 
 
+    def hit_rate(rows):
+        return sum(r["hit"] for r in rows) / len(rows) if rows else None
+
+
+    def question_stats(rows, labels, questions):
+        """Metrics per question for one series' rows.
+
+        Hit rate against its baseline, mean loss, and, for yes/no questions, the AUC
+        and number of yes labels, or for scores the Spearman correlation with the labels.
+        """
+        stats = {}
+        for key, question in questions.items():
+            rs = [r for r in rows if r["question"] == key]
+            if not rs:
+                continue
+            truths = [t[key] for t in labels.values() if key in t]
+            baseline = baseline_hit_rate(question, truths) if truths else None
+            hit = hit_rate(rs)
+            area = rho = yes_labels = None
+            if question["type"] == "noul":
+                yes_labels = sum(bool(r["truth"]) for r in rs)
+                area = auc([r["value"] for r in rs], [bool(r["truth"]) for r in rs])
+            elif question["type"] == "score":
+                rho = spearman([r["value"] for r in rs], [r["truth"] for r in rs])
+            stats[key] = {
+                "type": question["type"],
+                "n": len(rs),
+                "hit rate": hit,
+                "baseline": baseline,
+                "lift": None if baseline is None else hit - baseline,
+                "AUC": area,
+                "Spearman": rho,
+                "mean loss": sum(r["loss"] for r in rs) / len(rs),
+                "yes labels": yes_labels,
+            }
+        return stats
+
+
+    def _round(value, digits=2):
+        return None if value is None else round(value, digits)
+
+
     def eval_tables(rows, labels, questions):
-        """Aggregate scored rows into report tables, one column per series.
+        """Aggregate scored rows into report tables.
 
         Each row needs a `series` (what to compare, e.g. a model or a model and run).
         """
         series = list(dict.fromkeys(r["series"] for r in rows))
         by_series = {s: [r for r in rows if r["series"] == s] for s in series}
+        stats = {s: question_stats(rs, labels, questions) for s, rs in by_series.items()}
 
-        def rate(rs):
-            return sum(r["hit"] for r in rs) / len(rs) if rs else None
-
-        by_question = []
-        for key, question in questions.items():
-            truths = [t[key] for t in labels.values() if key in t]
-            by_question.append({
-                "question": key,
-                "type": question["type"],
-                "baseline": baseline_hit_rate(question, truths) if truths else None,
-                **{s: rate([r for r in rs if r["question"] == key]) for s, rs in by_series.items()},
-            })
-
-        def beats(s):
-            wins = [q for q in by_question if q[s] is not None and q["baseline"] is not None and q[s] > q["baseline"]]
-            return f"{len(wins)} of {len(by_question)} questions"
-
-        baselines = [q["baseline"] for q in by_question if q["baseline"] is not None]
-        summary = [
+        by_question = [
             {
+                "question": key,
+                "type": st["type"],
                 "series": s,
-                "hit rate": rate(rs),
-                "baseline": sum(baselines) / len(baselines),
-                "beats baseline": beats(s),
-                "mean loss": round(sum(r["loss"] for r in rs) / len(rs), 3),
-                "ms/example": round(sum(r.get("predict_ms") or 0 for r in rs) / len(rs)),
+                "n": st["n"],
+                "hit rate": st["hit rate"],
+                "baseline": st["baseline"],
+                "lift": st["lift"],
+                "AUC": _round(st["AUC"]),
+                "Spearman": _round(st["Spearman"]),
+                "mean loss": _round(st["mean loss"], 3),
+                "yes labels": st["yes labels"],
             }
-            for s, rs in by_series.items()
+            for key in questions
+            for s in series
+            if (st := stats[s].get(key))
         ]
 
-        by_example = [
-            {"example": name, **{s: rate([r for r in rs if r["example"] == name]) for s, rs in by_series.items()}}
-            for name in labels
-        ]
+        by_example = []
+        for name, truth in labels.items():
+            row = {"example": name, "purity label": truth["purity"]}
+            for s, rs in by_series.items():
+                mine = [r for r in rs if r["example"] == name]
+                row[s] = hit_rate(mine)
+                row[f"{s} loss"] = _round(sum(r["loss"] for r in mine) / len(mine), 3) if mine else None
+                row[f"{s} misses"] = sum(not r["hit"] for r in mine) if mine else None
+            by_example.append(row)
 
         misses = sorted((r for r in rows if not r["hit"]), key=lambda r: -r["loss"])
         misses = [
-            {"series": r["series"], **{k: r[k] for k in ("example", "question", "predicted", "truth")}, "loss": round(r["loss"], 3)}
+            {
+                "series": r["series"],
+                **{k: r[k] for k in ("example", "question", "predicted", "truth")},
+                "value": _round(r["value"]),
+                "confidence": _round(r.get("confidence")),
+                "loss": round(r["loss"], 3),
+            }
             for r in misses
         ]
 
@@ -570,12 +793,15 @@ def _(json, laya, mo, with_language):
             for lo, hi in zip(edges, edges[1:]):
                 bucket = [r for r in yes_no if lo <= r["value"] < hi]
                 if bucket:
+                    mean_p = sum(r["value"] for r in bucket) / len(bucket)
+                    actual = sum(bool(r["truth"]) for r in bucket) / len(bucket)
                     calibration.append({
                         "series": s,
                         "p(yes) range": f"{lo:.1f}-{min(hi, 1):.1f}",
                         "n": len(bucket),
-                        "mean p(yes)": sum(r["value"] for r in bucket) / len(bucket),
-                        "actual yes": sum(bool(r["truth"]) for r in bucket) / len(bucket),
+                        "mean p(yes)": mean_p,
+                        "actual yes": actual,
+                        "gap": mean_p - actual,
                     })
 
         coverage = []
@@ -587,16 +813,36 @@ def _(json, laya, mo, with_language):
                     coverage.append({
                         "series": s,
                         "confidence at least": floor,
+                        "n": len(kept),
                         "coverage": len(kept) / len(scored),
-                        "hit rate": rate(kept),
+                        "hit rate": hit_rate(kept),
+                        "mean loss": _round(sum(r["loss"] for r in kept) / len(kept), 3),
                     })
 
-        purity = purity_table(by_series, labels)
+        summary = []
+        for s, rs in by_series.items():
+            per_question = stats[s].values()
+            lifts = [st["lift"] for st in per_question if st["lift"] is not None]
+            baselines = [st["baseline"] for st in per_question if st["baseline"] is not None]
+            areas = [st["AUC"] for st in per_question if st["AUC"] is not None]
+            bins = [c for c in calibration if c["series"] == s]
+            seen = sum(c["n"] for c in bins)
+            summary.append({
+                "series": s,
+                "examples": len({r["example"] for r in rs}),
+                "hit rate": hit_rate(rs),
+                "baseline": sum(baselines) / len(baselines) if baselines else None,
+                "beats baseline": f"{sum(lift > 0 for lift in lifts)} of {len(lifts)} questions",
+                "mean AUC": _round(sum(areas) / len(areas)) if areas else None,
+                "calibration error": sum(c["n"] * abs(c["gap"]) for c in bins) / seen if seen else None,
+                "mean loss": round(sum(r["loss"] for r in rs) / len(rs), 3),
+                "ms/example": round(sum(r.get("predict_ms") or 0 for r in rs) / len(rs)),
+            })
 
         return {
             "series": series,
-            "purity": purity,
             "summary": summary,
+            "purity": purity_table(by_series, labels),
             "by_question": by_question,
             "by_example": by_example,
             "misses": misses,
@@ -611,13 +857,17 @@ def _(json, laya, mo, with_language):
         def pct(value):
             return "-" if value is None else f"{value:.0%}"
 
-        percent = {
-            c: pct
-            for c in ["baseline", "hit rate", "coverage", "mean p(yes)", "actual yes", *tables["series"]]
+        def points(value):
+            return "-" if value is None else f"{value * 100:+.0f} pts"
+
+        formats = {
+            **{c: pct for c in ["baseline", "hit rate", "coverage", "mean p(yes)", "actual yes", "calibration error", *tables["series"]]},
+            "lift": points,
+            "gap": points,
         }
 
         def table(rows):
-            return mo.ui.table(rows, selection=None, format_mapping=percent, page_size=25)
+            return mo.ui.table(rows, selection=None, format_mapping=formats, page_size=25)
 
         return mo.vstack([
             table(tables["summary"]),
@@ -635,6 +885,7 @@ def _(json, laya, mo, with_language):
         collect_eval_rows,
         eval_tables,
         make_run_meta,
+        question_stats,
         render_eval_tables,
         write_jsonl,
     )
@@ -712,50 +963,23 @@ def _(eval_rows, eval_tables, labels, questions, render_eval_tables):
 
 
 @app.cell
-def _(mo):
-    rescan = mo.ui.button(label="Rescan results")
-    return (rescan,)
-
-
-@app.cell
-def _(mo, rescan):
-    rescan.value  # re-run when the button is pressed
-
-    _results = mo.notebook_dir() / "results"
-    run_files = {p.stem.removeprefix("eval-"): p for p in sorted(_results.glob("eval-*.jsonl"))}
-
-    saved_runs = mo.ui.multiselect(
-        options=list(reversed(run_files)),
-        value=list(run_files)[-1:],
-        label="Saved runs",
-    )
-    mo.vstack([
-        mo.md("## Saved runs"),
-        mo.hstack([saved_runs, rescan], justify="start", align="end"),
-    ])
-    return run_files, saved_runs
-
-
-@app.cell
 def _(
     eval_tables,
-    json,
     labels,
     make_run_meta,
     mo,
     questions,
     render_eval_tables,
-    run_files,
+    saved_run_rows,
     saved_runs,
 ):
     mo.stop(not saved_runs.value, mo.md("*No saved runs to show yet.*"))
 
-    saved_rows = []
-    for _run_id in saved_runs.value:
-        for _line in run_files[_run_id].read_text().splitlines():
-            _row = json.loads(_line)
-            _series = _row["model"] if len(saved_runs.value) == 1 else f"{_row['model']} {_run_id}"
-            saved_rows.append({**_row, "series": _series})
+    saved_rows = [
+        {**row, "series": row["model"] if len(saved_run_rows) == 1 else f"{row['model']} {run_id}"}
+        for run_id, rows in saved_run_rows.items()
+        for row in rows
+    ]
 
     _current = make_run_meta(questions, labels)
     _stale = sorted({
@@ -769,7 +993,7 @@ def _(
             kind="warn",
         )
         if _stale
-        else mo.md(f"{len(saved_rows)} rows from {len(saved_runs.value)} run(s)"),
+        else mo.md(f"{len(saved_rows)} rows from {len(saved_run_rows)} run(s)"),
         render_eval_tables(eval_tables(saved_rows, labels, questions)),
     ])
     return
