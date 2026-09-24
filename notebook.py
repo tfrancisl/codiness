@@ -47,24 +47,48 @@ def _(mo):
 
 @app.cell
 def _():
-    programming_languages = set(["C", "Python", "Rust", "C++", "C#", "Perl", "JavaScript", "Zig", "Julia", "ASM", "Clojure", "Lisp", "Haskell", "F#", "R", "Fortran", "ALGOL", "COBOL", "Smalltalk", "Verilog", "Objective-C", "Swift", "BASIC", "Visual Basic", "Erlang", "Bash", "OCaml", "GDScript", "Java", "Scratch", "Nix", "Scala", "Kotlin", "Lean", "other"])
-    return (programming_languages,)
+    language_by_suffix = {
+        ".py": "Python",
+        ".sh": "Bash",
+        ".rs": "Rust",
+        ".c": "C",
+        ".cpp": "C++",
+        ".java": "Java",
+        ".kt": "Kotlin",
+        ".js": "JavaScript",
+        ".cs": "C#",
+        ".swift": "Swift",
+        ".hs": "Haskell",
+        ".zig": "Zig",
+        ".jl": "Julia",
+        ".nix": "Nix",
+        ".ml": "OCaml",
+    }
+    _fence_tags = {"Bash": "bash", "C#": "csharp", "C++": "cpp"}
+
+
+    def with_language(name, code):
+        """Give the model the language up front.
+
+        Guessing the language from a snippet is unreliable for these checkpoints,
+        and it is known from the file name anyway, so state it instead of asking.
+        """
+        language = language_by_suffix.get("." + name.rsplit(".", 1)[-1])
+        if language is None:
+            return code
+        tag = _fence_tags.get(language, language.lower())
+        return f"Programming language: {language}\n\n```{tag}\n{code}\n```"
+
+    return (with_language,)
 
 
 @app.cell
-def _(programming_languages):
+def _():
     def _yes_no(text):
         return {"type": "noul", "instructions": text}
 
 
     question_groups = {
-        "Language": {
-            "programming_language": {
-                "type": "choice",
-                "instructions": "Which programming language is this?",
-                "criteria": sorted(programming_languages),
-            },
-        },
         "Inputs": {
             "input_source": {
                 "type": "choice",
@@ -179,9 +203,9 @@ def _(example_picker, examples, mo):
 
 
 @app.cell
-def _(message, model_picker, questions, router):
+def _(example_picker, message, model_picker, questions, router, with_language):
     result = router.predict(
-        message.value,
+        with_language(example_picker.value, message.value),
         questions,
         model=None if model_picker.value == "auto" else model_picker.value,
     )
@@ -298,7 +322,7 @@ def _(examples, mo, questions):
 
 
 @app.cell
-def _(json, laya, mo):
+def _(json, laya, mo, with_language):
     import datetime
     import hashlib
     import subprocess
@@ -357,6 +381,7 @@ def _(json, laya, mo):
             "git_rev": git_rev,
             "questions_sha": _sha(questions),
             "labels_sha": _sha(labels),
+            "framing": "language-fence",
         }
 
 
@@ -381,7 +406,7 @@ def _(json, laya, mo):
         for model in models:
             for name, truth in labels.items():
                 started = time.perf_counter()
-                result = router.predict(examples[name], questions, model=model)
+                result = router.predict(with_language(name, examples[name]), questions, model=model)
                 predict_ms = (time.perf_counter() - started) * 1000
                 device = str(getattr(router._agents.get(model), "device", "unknown"))
                 for key, question in questions.items():
@@ -409,6 +434,84 @@ def _(json, laya, mo):
     def write_jsonl(rows, path):
         """Write one JSON object per line."""
         path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+
+    def _ranks(values):
+        """Average ranks (0-based), with ties sharing their mean rank."""
+        order = sorted(range(len(values)), key=values.__getitem__)
+        ranks = [0.0] * len(values)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            for k in range(i, j + 1):
+                ranks[order[k]] = (i + j) / 2
+            i = j + 1
+        return ranks
+
+
+    def spearman(a, b):
+        """Spearman rank correlation, or None if either side is constant."""
+        ra, rb = _ranks(a), _ranks(b)
+        ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
+        cov = sum((x - ma) * (y - mb) for x, y in zip(ra, rb))
+        var_a = sum((x - ma) ** 2 for x in ra)
+        var_b = sum((y - mb) ** 2 for y in rb)
+        return cov / (var_a * var_b) ** 0.5 if var_a and var_b else None
+
+
+    def auc(scores, positives):
+        """Chance that a random positive outscores a random negative."""
+        ranks = _ranks(scores)
+        positive_ranks = [r for r, p in zip(ranks, positives) if p]
+        n_pos, n_neg = len(positive_ranks), len(ranks) - len(positive_ranks)
+        if not n_pos or not n_neg:
+            return None
+        return (sum(positive_ranks) - n_pos * (n_pos - 1) / 2) / (n_pos * n_neg)
+
+
+    # yes/no questions whose "yes" makes code less pure
+    purity_effects = [
+        "writes_files", "network", "subprocess", "database", "global_state",
+        "mutates_arguments", "logs_or_prints", "reads_environment", "destructive",
+    ]
+
+
+    def purity_table(by_series, labels):
+        """How well each series ranks examples by impurity, against the labelled purity level.
+
+        Compares the direct purity score with the mean of the side-effect answers and
+        "not deterministic", each weighted equally. AUC is the chance an impure example scores higher than a pure one.
+        """
+        table = []
+        for series, rows in by_series.items():
+            values = {}
+            for r in rows:
+                values.setdefault(r["example"], {})[r["question"]] = r["value"]
+            needed = ["purity", "deterministic", *purity_effects]
+            names = [n for n in labels if all(q in values.get(n, {}) for q in needed)]
+            if len(names) < 3:
+                continue
+            truth = [labels[n]["purity"] for n in names]
+            signals = {
+                "direct purity score": [values[n]["purity"] for n in names],
+                "mean of side-effect answers": [
+                    (sum(values[n][q] for q in purity_effects) + 1 - values[n]["deterministic"])
+                    / (len(purity_effects) + 1)
+                    for n in names
+                ],
+            }
+            for signal, scores in signals.items():
+                rho, area = spearman(scores, truth), auc(scores, [t > 0 for t in truth])
+                table.append({
+                    "series": series,
+                    "signal": signal,
+                    "examples": len(names),
+                    "spearman": None if rho is None else round(rho, 2),
+                    "AUC (impure vs pure)": None if area is None else round(area, 2),
+                })
+        return table
 
 
     def eval_tables(rows, labels, questions):
@@ -488,8 +591,11 @@ def _(json, laya, mo):
                         "hit rate": rate(kept),
                     })
 
+        purity = purity_table(by_series, labels)
+
         return {
             "series": series,
+            "purity": purity,
             "summary": summary,
             "by_question": by_question,
             "by_example": by_example,
@@ -516,6 +622,7 @@ def _(json, laya, mo):
         return mo.vstack([
             table(tables["summary"]),
             mo.ui.tabs({
+                "Purity": table(tables["purity"]),
                 "By question": table(tables["by_question"]),
                 "By example": table(tables["by_example"]),
                 "Calibration": table(tables["calibration"]),
