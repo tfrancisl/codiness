@@ -1,0 +1,34 @@
+{
+  "nixpkgs": {
+    "type": "github",
+    "owner": "NixOS",
+    "repo": "nixpkgs",
+    "rev": "34ca302a9572963c02e385c056be37c85ff51b77",
+    "narHash": "sha256-ym4BG18Pu2awiJIehla1Lo9xiB2QYRcCzW3SB74gEBY=",
+    "lastModified": 1790238896
+  },
+  "pyproject-build-systems": {
+    "type": "github",
+    "owner": "pyproject-nix",
+    "repo": "build-system-pkgs",
+    "rev": "14b45373ea9a14ed2fcd0abf3ed35c8e3c430020",
+    "narHash": "sha256-mj5BLUKECIHv3rwkBXL6xQp45gIBJV7ZOYgT46LXwho=",
+    "lastModified": 1789963190
+  },
+  "pyproject-nix": {
+    "type": "github",
+    "owner": "pyproject-nix",
+    "repo": "pyproject.nix",
+    "rev": "6a8a7881d75b6f98967e7b8069f4ead331384301",
+    "narHash": "sha256-xYOP0Xym1eVGUaHFx+eJEaycFGoiCbst3fZf0xFHP78=",
+    "lastModified": 1788394333
+  },
+  "uv2nix": {
+    "type": "github",
+    "owner": "pyproject-nix",
+    "repo": "uv2nix",
+    "rev": "079be4e68c529c4cbc44dbf1afc692e4b30695b3",
+    "narHash": "sha256-+DkygIVr/+RtXnsjd07BzFFB0ihwmjjLuYh1fyc/bCg=",
+    "lastModified": 1789383061
+  }
+}

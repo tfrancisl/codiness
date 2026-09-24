@@ -1,0 +1,17 @@
+[all_follow]
+nixpkgs = "nixpkgs"
+
+[inputs]
+[inputs.nixpkgs]
+url = "github:NixOS/nixpkgs/nixpkgs-unstable"
+
+[inputs.pyproject-nix]
+url = "github:pyproject-nix/pyproject.nix"
+
+[inputs.uv2nix]
+url = "github:pyproject-nix/uv2nix"
+follows = { pyproject-nix = "pyproject-nix" }
+
+[inputs.pyproject-build-systems]
+url = "github:pyproject-nix/build-system-pkgs"
+follows = { pyproject-nix = "pyproject-nix", uv2nix = "uv2nix" }

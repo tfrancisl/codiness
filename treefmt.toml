@@ -1,0 +1,14 @@
+on-unmatched = "info"
+
+[formatter.nixfmt]
+command = "nixfmt"
+includes = ["*.nix"]
+
+[formatter.taplo]
+command = "taplo"
+options = ["format"]
+includes = ["*.toml"]
+
+[formatter.jq-json]
+command = "jqfmt"
+includes = ["*.json"]
