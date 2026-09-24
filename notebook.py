@@ -294,11 +294,16 @@ def _(examples, mo, questions):
     mo.callout(mo.md("\n\n".join(_problems)), kind="warn") if _problems else mo.md(
         f"`labels.json`: {len(labels)} labelled examples, {len(questions)} questions each"
     )
-    return (labels,)
+    return json, labels
 
 
 @app.cell
-def _():
+def _(json, laya, mo):
+    import datetime
+    import hashlib
+    import subprocess
+    import time
+
     def score_answer(question, answer, truth):
         """Score one answer against its label as (hit, loss).
 
@@ -334,33 +339,198 @@ def _():
         return f"{answer['score']:.1f}"
 
 
-    def collect_eval_rows(router, examples, labels, questions, models, on_step=lambda: None):
+    def make_run_meta(questions, labels):
+        """Facts that tie a set of eval rows to the code, questions and labels that made them."""
+
+        def _sha(obj):
+            return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()[:12]
+
+        try:
+            git_rev = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            git_rev = None
+        return {
+            "run_id": datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+            "laya_version": laya.__version__,
+            "git_rev": git_rev,
+            "questions_sha": _sha(questions),
+            "labels_sha": _sha(labels),
+        }
+
+
+    def answer_value(question, answer):
+        """The model's raw number for an answer: p(yes), the score, or p(chosen option)."""
+        kind = question["type"]
+        if kind == "noul":
+            return answer["noul"]
+        if kind == "score":
+            return answer["score"]
+        return answer["probabilities"][answer["choice"]]
+
+
+    def collect_eval_rows(router, examples, labels, questions, models, run_meta=None, on_step=lambda: None):
         """Run every labelled example through each model and score every answer.
 
         Models are the outer loop so the router only has to swap checkpoints once
-        per model. Returns one plain dict per (model, example, question).
+        per model. Returns one plain, JSON-serializable dict per (model, example,
+        question), each carrying `run_meta` and the time the example took to predict.
         """
         rows = []
         for model in models:
             for name, truth in labels.items():
+                started = time.perf_counter()
                 result = router.predict(examples[name], questions, model=model)
+                predict_ms = (time.perf_counter() - started) * 1000
+                device = str(getattr(router._agents.get(model), "device", "unknown"))
                 for key, question in questions.items():
                     answer = result["answers"][key]
                     hit, loss = score_answer(question, answer, truth[key])
                     rows.append({
+                        **(run_meta or {}),
                         "model": model,
+                        "device": device,
                         "example": name,
                         "question": key,
                         "type": question["type"],
                         "predicted": describe_answer(question, answer),
+                        "value": answer_value(question, answer),
+                        "confidence": answer.get("confidence"),
                         "truth": truth[key],
                         "hit": hit,
                         "loss": loss,
+                        "predict_ms": round(predict_ms, 1),
                     })
                 on_step()
         return rows
 
-    return baseline_hit_rate, collect_eval_rows
+
+    def write_jsonl(rows, path):
+        """Write one JSON object per line."""
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+
+    def eval_tables(rows, labels, questions):
+        """Aggregate scored rows into report tables, one column per series.
+
+        Each row needs a `series` (what to compare, e.g. a model or a model and run).
+        """
+        series = list(dict.fromkeys(r["series"] for r in rows))
+        by_series = {s: [r for r in rows if r["series"] == s] for s in series}
+
+        def rate(rs):
+            return sum(r["hit"] for r in rs) / len(rs) if rs else None
+
+        by_question = []
+        for key, question in questions.items():
+            truths = [t[key] for t in labels.values() if key in t]
+            by_question.append({
+                "question": key,
+                "type": question["type"],
+                "baseline": baseline_hit_rate(question, truths) if truths else None,
+                **{s: rate([r for r in rs if r["question"] == key]) for s, rs in by_series.items()},
+            })
+
+        def beats(s):
+            wins = [q for q in by_question if q[s] is not None and q["baseline"] is not None and q[s] > q["baseline"]]
+            return f"{len(wins)} of {len(by_question)} questions"
+
+        baselines = [q["baseline"] for q in by_question if q["baseline"] is not None]
+        summary = [
+            {
+                "series": s,
+                "hit rate": rate(rs),
+                "baseline": sum(baselines) / len(baselines),
+                "beats baseline": beats(s),
+                "mean loss": round(sum(r["loss"] for r in rs) / len(rs), 3),
+                "ms/example": round(sum(r.get("predict_ms") or 0 for r in rs) / len(rs)),
+            }
+            for s, rs in by_series.items()
+        ]
+
+        by_example = [
+            {"example": name, **{s: rate([r for r in rs if r["example"] == name]) for s, rs in by_series.items()}}
+            for name in labels
+        ]
+
+        misses = sorted((r for r in rows if not r["hit"]), key=lambda r: -r["loss"])
+        misses = [
+            {"series": r["series"], **{k: r[k] for k in ("example", "question", "predicted", "truth")}, "loss": round(r["loss"], 3)}
+            for r in misses
+        ]
+
+        edges = [0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0001]
+        calibration = []
+        for s, rs in by_series.items():
+            yes_no = [r for r in rs if r["type"] == "noul"]
+            for lo, hi in zip(edges, edges[1:]):
+                bucket = [r for r in yes_no if lo <= r["value"] < hi]
+                if bucket:
+                    calibration.append({
+                        "series": s,
+                        "p(yes) range": f"{lo:.1f}-{min(hi, 1):.1f}",
+                        "n": len(bucket),
+                        "mean p(yes)": sum(r["value"] for r in bucket) / len(bucket),
+                        "actual yes": sum(bool(r["truth"]) for r in bucket) / len(bucket),
+                    })
+
+        coverage = []
+        for s, rs in by_series.items():
+            scored = [r for r in rs if r.get("confidence") is not None]
+            for floor in (0, 0.5, 0.7, 0.85, 0.95):
+                kept = [r for r in scored if r["confidence"] >= floor]
+                if kept:
+                    coverage.append({
+                        "series": s,
+                        "confidence at least": floor,
+                        "coverage": len(kept) / len(scored),
+                        "hit rate": rate(kept),
+                    })
+
+        return {
+            "series": series,
+            "summary": summary,
+            "by_question": by_question,
+            "by_example": by_example,
+            "misses": misses,
+            "calibration": calibration,
+            "coverage": coverage,
+        }
+
+
+    def render_eval_tables(tables):
+        """Lay the tables from `eval_tables` out as a summary plus tabs."""
+
+        def pct(value):
+            return "-" if value is None else f"{value:.0%}"
+
+        percent = {
+            c: pct
+            for c in ["baseline", "hit rate", "coverage", "mean p(yes)", "actual yes", *tables["series"]]
+        }
+
+        def table(rows):
+            return mo.ui.table(rows, selection=None, format_mapping=percent, page_size=25)
+
+        return mo.vstack([
+            table(tables["summary"]),
+            mo.ui.tabs({
+                "By question": table(tables["by_question"]),
+                "By example": table(tables["by_example"]),
+                "Calibration": table(tables["calibration"]),
+                "Confidence vs. hit rate": table(tables["coverage"]),
+                f"Misses ({len(tables['misses'])})": table(tables["misses"]),
+            }),
+        ])
+
+    return (
+        collect_eval_rows,
+        eval_tables,
+        make_run_meta,
+        render_eval_tables,
+        write_jsonl,
+    )
 
 
 @app.cell
@@ -384,6 +554,7 @@ def _(
     eval_models,
     examples,
     labels,
+    make_run_meta,
     mo,
     questions,
     router,
@@ -399,69 +570,100 @@ def _(
         total=len(eval_models.value) * len(labels), title="Evaluating"
     ) as _bar:
         eval_rows = collect_eval_rows(
-            router, examples, labels, questions, eval_models.value, on_step=_bar.update
+            router,
+            examples,
+            labels,
+            questions,
+            eval_models.value,
+            run_meta=make_run_meta(questions, labels),
+            on_step=_bar.update,
         )
     return (eval_rows,)
 
 
 @app.cell
-def _(baseline_hit_rate, eval_models, eval_rows, labels, mo, questions):
-    _models = list(eval_models.value)
+def _(eval_rows, mo, write_jsonl):
+    results_dir = mo.notebook_dir() / "results"
+    results_dir.mkdir(exist_ok=True)
 
+    eval_path = results_dir / f"eval-{eval_rows[0]['run_id']}.jsonl"
+    write_jsonl(eval_rows, eval_path)
 
-    def _rate(rows):
-        return sum(r["hit"] for r in rows) / len(rows)
-
-
-    def _pct(value):
-        return f"{value:.0%}"
-
-
-    _by_question = []
-    for _key, _question in questions.items():
-        _row = {
-            "question": _key,
-            "type": _question["type"],
-            "baseline": baseline_hit_rate(_question, [t[_key] for t in labels.values()]),
-        }
-        for _m in _models:
-            _row[_m] = _rate([r for r in eval_rows if r["model"] == _m and r["question"] == _key])
-        _by_question.append(_row)
-
-    _summary = []
-    for _m in _models:
-        _rows = [r for r in eval_rows if r["model"] == _m]
-        _summary.append({
-            "model": _m,
-            "hit rate": _rate(_rows),
-            "baseline": sum(r["baseline"] for r in _by_question) / len(_by_question),
-            "beats baseline": f"{sum(r[_m] > r['baseline'] for r in _by_question)} of {len(_by_question)} questions",
-            "mean loss": round(sum(r["loss"] for r in _rows) / len(_rows), 3),
-        })
-
-    _by_example = [
-        {"example": _name, **{_m: _rate([r for r in eval_rows if r["model"] == _m and r["example"] == _name]) for _m in _models}}
-        for _name in labels
-    ]
-
-    _misses = sorted(
-        (r for r in eval_rows if not r["hit"]),
-        key=lambda r: -r["loss"],
+    mo.md(
+        f"Exported {len(eval_rows)} rows to `{eval_path.relative_to(mo.notebook_dir())}` "
+        f"({eval_path.stat().st_size / 1024:.0f} KiB)"
     )
-    _misses = [
-        {k: r[k] for k in ("model", "example", "question", "predicted", "truth", "loss")} | {"loss": round(r["loss"], 3)}
-        for r in _misses
-    ]
+    return
 
-    _percent_columns = {c: _pct for c in ["baseline", "hit rate", *_models]}
 
+@app.cell
+def _(eval_rows, eval_tables, labels, questions, render_eval_tables):
+    render_eval_tables(
+        eval_tables([{**r, "series": r["model"]} for r in eval_rows], labels, questions)
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    rescan = mo.ui.button(label="Rescan results")
+    return (rescan,)
+
+
+@app.cell
+def _(mo, rescan):
+    rescan.value  # re-run when the button is pressed
+
+    _results = mo.notebook_dir() / "results"
+    run_files = {p.stem.removeprefix("eval-"): p for p in sorted(_results.glob("eval-*.jsonl"))}
+
+    saved_runs = mo.ui.multiselect(
+        options=list(reversed(run_files)),
+        value=list(run_files)[-1:],
+        label="Saved runs",
+    )
     mo.vstack([
-        mo.ui.table(_summary, selection=None, format_mapping=_percent_columns),
-        mo.ui.tabs({
-            "By question": mo.ui.table(_by_question, selection=None, format_mapping=_percent_columns, page_size=25),
-            "By example": mo.ui.table(_by_example, selection=None, format_mapping=_percent_columns, page_size=25),
-            f"Misses ({len(_misses)})": mo.ui.table(_misses, selection=None, page_size=25),
-        }),
+        mo.md("## Saved runs"),
+        mo.hstack([saved_runs, rescan], justify="start", align="end"),
+    ])
+    return run_files, saved_runs
+
+
+@app.cell
+def _(
+    eval_tables,
+    json,
+    labels,
+    make_run_meta,
+    mo,
+    questions,
+    render_eval_tables,
+    run_files,
+    saved_runs,
+):
+    mo.stop(not saved_runs.value, mo.md("*No saved runs to show yet.*"))
+
+    saved_rows = []
+    for _run_id in saved_runs.value:
+        for _line in run_files[_run_id].read_text().splitlines():
+            _row = json.loads(_line)
+            _series = _row["model"] if len(saved_runs.value) == 1 else f"{_row['model']} {_run_id}"
+            saved_rows.append({**_row, "series": _series})
+
+    _current = make_run_meta(questions, labels)
+    _stale = sorted({
+        r["run_id"]
+        for r in saved_rows
+        if (r["questions_sha"], r["labels_sha"]) != (_current["questions_sha"], _current["labels_sha"])
+    })
+    mo.vstack([
+        mo.callout(
+            mo.md(f"Runs {', '.join(_stale)} used different questions or labels than this notebook has now."),
+            kind="warn",
+        )
+        if _stale
+        else mo.md(f"{len(saved_rows)} rows from {len(saved_runs.value)} run(s)"),
+        render_eval_tables(eval_tables(saved_rows, labels, questions)),
     ])
     return
 
