@@ -58,6 +58,12 @@ in
         shellHook = ''
           unset PYTHONPATH
           export REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+          # NixOS keeps the driver's libcuda.so.1 here; neither torch nor triton's
+          # JIT (which shells out to /sbin/ldconfig) will find it on their own
+          if [ -d /run/opengl-driver/lib ]; then
+            export LD_LIBRARY_PATH=/run/opengl-driver/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+            export TRITON_LIBCUDA_PATH=/run/opengl-driver/lib
+          fi
         '';
       };
     }

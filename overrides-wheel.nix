@@ -39,7 +39,22 @@ addDeps "nvidia-cufile" [ pkgs.rdma-core ] { }
   final.nvidia-cusparse
   final.nvidia-nvjitlink
 ] { }
-// addDeps "nvidia-cudnn-cu13" [ final.nvidia-cublas ] { }
+//
+  addDeps "nvidia-cudnn-cu13"
+    [
+      final.nvidia-cublas
+      final.nvidia-cuda-nvrtc
+    ]
+    {
+      # libcudnn dlopens its sibling engine libraries by name at runtime, so
+      # they must stay findable via $ORIGIN once autoPatchelf rewrites the RPATH
+      autoPatchelfFlags = [ "--preserve-origin" ];
+      postFixup = ''
+        for f in $out/${final.python.sitePackages}/nvidia/cudnn/lib/*.so*; do
+          patchelf --add-rpath '$ORIGIN' "$f"
+        done
+      '';
+    }
 //
   addDeps "nvidia-nvshmem-cu13"
     [
