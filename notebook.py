@@ -15,7 +15,11 @@ def _():
 @app.cell
 def _(laya, mo):
     mo.md(f"""
-    # Laya playground\n\nlaya `{laya.__version__}`
+    # Laya code assessment
+
+    Ask [Laya](https://pypi.org/project/laya/) {laya.__version__} yes/no, score and
+    multiple-choice questions about a snippet, then score its answers against the
+    hand-written labels. See the README for how the pieces fit together.
     """)
     return
 

@@ -11,5 +11,5 @@ outputs.devShells.${system}.default.overrideAttrs (old: {
     pkgs.nixfmt
     pkgs.taplo
   ];
-  TACK_DIR = "./.tack"; # my inputs.nix confuses tack
+  TACK_DIR = "./.tack"; # inputs.nix here is not tack's, so point it at .tack
 })

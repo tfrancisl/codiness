@@ -2,6 +2,9 @@
 final: prev:
 let
   inherit (pkgs) lib;
+
+  # Add `extra` to a wheel's buildInputs so autoPatchelfHook can resolve the
+  # libraries it needs, merging any further attributes from `attrs`.
   addDeps = name: extra: attrs: {
     ${name} = prev.${name}.overrideAttrs (
       old:
@@ -22,15 +25,8 @@ let
   };
 in
 
-# Wheels are automatically patched using autoPatchelfHook.
-#
-# For manylinux wheels the appropriate packages are added
-# as described in https://peps.python.org/pep-0599/ and various other PEPs.
-#
-# Some packages provide binary libraries as a part of their binary wheels,
-# others expect libraries to be provided by the system.
-
-# laya overrides
+# Binary wheels are patched with autoPatchelfHook. Laya's CUDA stack ships some
+# of its libraries in sibling wheels and expects the rest from the system.
 addDeps "nvidia-cufile" [ pkgs.rdma-core ] { }
 // addDeps "nvidia-cusparse" [ final.nvidia-nvjitlink ] { }
 // addDeps "nvidia-cufft" [ final.nvidia-nvjitlink ] { }

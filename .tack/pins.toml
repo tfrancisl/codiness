@@ -16,6 +16,7 @@ follows = { pyproject-nix = "pyproject-nix" }
 url = "github:pyproject-nix/build-system-pkgs"
 follows = { pyproject-nix = "pyproject-nix", uv2nix = "uv2nix" }
 
+# Source tree only, sliced by corpus.nix; not evaluated as a flake
 [inputs.cpython]
 url = "github:python/cpython?rev=823f0323ee6ec1402088b73bce1a38473cac36dc"
 type = "fetch"

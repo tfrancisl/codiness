@@ -1,14 +1,13 @@
-# Real code sliced out of pinned sources (see .tack/pins.toml); nothing here is
-# copied into the repo. Build with:
+# Real code sliced out of the pinned sources in .tack/pins.toml. Build with:
 #   nix-build -A packages.x86_64-linux.corpus -o corpus/snippets
 #
 # id       output file is <id>.<extension of path>
-# pin      name of a tack pin
+# pin      tack pin to slice from
 # path     file inside the pin
 # lines    optional [first, last]; the whole file if absent
-# dedent   optional number of leading spaces to strip from every line
+# dedent   optional number of leading spaces to strip
 # license  of the source file, for reference
-# sha256   of the extracted text, so a moved pin or line range fails the build
+# sha256   of the extracted text; a moved pin or line range fails the build
 
 [[snippet]]
 id = "nixpkgs_hello"
