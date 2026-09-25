@@ -3,3 +3,4 @@ result
 result/
 results/
 corpus/snippets
+__pycache__/
