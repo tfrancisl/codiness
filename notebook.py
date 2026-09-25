@@ -28,12 +28,25 @@ def _(laya):
 
 @app.cell
 def _(mo):
-    examples_dir = mo.notebook_dir() / "examples"
-    examples = {p.name: p.read_text() for p in sorted(examples_dir.iterdir()) if p.is_file()}
+    _sources = {
+        "examples": mo.notebook_dir() / "examples",
+        "corpus": mo.notebook_dir() / "corpus" / "snippets",  # built from pinned sources, see corpus.nix
+    }
+    examples = {}
+    example_source = {}
+    for _source, _dir in _sources.items():
+        if _dir.is_dir():
+            for _path in sorted(_dir.iterdir()):
+                if _path.is_file():
+                    examples[_path.name] = _path.read_text()
+                    example_source[_path.name] = _source
 
+    _choices = {
+        name if example_source[name] == "examples" else f"{name} (corpus)": name for name in examples
+    }
     example_picker = mo.ui.dropdown(
-        options=list(examples),
-        value=next(iter(examples)),
+        options=_choices,
+        value=next(iter(_choices)),
         label="Example",
     )
     model_picker = mo.ui.dropdown(
@@ -207,6 +220,7 @@ def _():
                 "instructions": "How does the running time grow with the size of the data it processes?",
                 "criteria": {
                     "constant": "takes the same time whatever the input size",
+                    "logarithmic": "time grows with the logarithm of the input size, as in binary search or a heap operation",
                     "linear": "time grows in proportion to the input size",
                     "linearithmic": "time grows like n log n, as in efficient sorting",
                     "quadratic_or_worse": "nested passes over the input, or worse",
@@ -474,10 +488,16 @@ def _(mo, model_picker, overlay, question_groups, result):
 def _(examples, mo, questions):
     import json
 
-    labels = json.loads((mo.notebook_dir() / "labels.json").read_text())
+    _all_labels = {}
+    for _file in (mo.notebook_dir() / "labels.json", mo.notebook_dir() / "corpus" / "labels.json"):
+        if _file.exists():
+            _all_labels.update(json.loads(_file.read_text()))
+
+    # Labels for snippets that are not available, such as an unbuilt corpus, are set aside
+    labels = {name: truth for name, truth in _all_labels.items() if name in examples}
 
     _unlabelled = sorted(set(examples) - set(labels))
-    _orphaned = sorted(set(labels) - set(examples))
+    _unavailable = sorted(set(_all_labels) - set(examples))
     _missing_keys = sorted(
         f"{name}:{key}" for name, truth in labels.items() for key in questions if key not in truth
     )
@@ -485,14 +505,17 @@ def _(examples, mo, questions):
         f"{title}: {', '.join(items)}"
         for title, items in [
             ("examples without labels", _unlabelled),
-            ("labels without an example", _orphaned),
             ("labels missing a question", _missing_keys),
         ]
         if items
     ]
-    mo.callout(mo.md("\n\n".join(_problems)), kind="warn") if _problems else mo.md(
-        f"`labels.json`: {len(labels)} labelled examples, {len(questions)} questions each"
-    )
+    _summary = f"{len(labels)} labelled examples, {len(questions)} questions each"
+    if _unavailable:
+        _summary += (
+            f". {len(_unavailable)} labelled snippets are unavailable; build them with "
+            "`nix-build -A packages.x86_64-linux.corpus -o corpus/snippets`"
+        )
+    mo.callout(mo.md("\n\n".join(_problems)), kind="warn") if _problems else mo.md(_summary)
     return json, labels
 
 
@@ -891,7 +914,7 @@ def _(json, laya, mo, with_language):
     )
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(mo):
     eval_models = mo.ui.multiselect(
         options=["english", "typed-decisions", "multilingual"],
@@ -962,7 +985,7 @@ def _(eval_rows, eval_tables, labels, questions, render_eval_tables):
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(
     eval_tables,
     labels,
