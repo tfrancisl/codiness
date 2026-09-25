@@ -1,7 +1,7 @@
 [project]
-name = "hello-world"
+name = "codiness"
 version = "0.1.0"
-description = "Add your description here"
+description = "Assess code with Laya"
 requires-python = ">=3.12"
 dependencies = [
  "laya>=0.3.20",
@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hello = "hello_world:hello"
+codiness = "codiness:main"
 
 [build-system]
 requires = ["uv_build>=0.11.0,<0.13.0"]

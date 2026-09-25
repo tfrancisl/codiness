@@ -19,7 +19,7 @@ purity, complexity and robustness, then scores the answers against hand-written 
 | `overrides-wheel.nix` | Fixes the native libraries that the CUDA wheels expect |
 | `default.nix`, `inputs.nix`, `outputs.nix`, `shell.nix` | Nix entry points; no flakes |
 
-`src/hello_world` is left over from the uv2nix template.
+`src/codiness` is a placeholder package; the work is in the notebook.
 
 ## Running the notebook
 

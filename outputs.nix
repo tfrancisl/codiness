@@ -43,7 +43,7 @@ in
     let
       pkgs = nixpkgs.legacyPackages.${system};
       pythonSet = pythonSets.${system}.overrideScope editableOverlay;
-      virtualenv = pythonSet.mkVirtualEnv "hello-world-dev-env" workspace.deps.all;
+      virtualenv = pythonSet.mkVirtualEnv "codiness-dev-env" workspace.deps.all;
     in
     {
       default = pkgs.mkShell {
@@ -71,7 +71,7 @@ in
   );
 
   packages = forAllSystems (system: {
-    default = pythonSets.${system}.mkVirtualEnv "hello-world-env" workspace.deps.default;
+    default = pythonSets.${system}.mkVirtualEnv "codiness-env" workspace.deps.default;
     corpus = nixpkgs.legacyPackages.${system}.callPackage ./corpus.nix {
       sources = { inherit nixpkgs cpython; };
     };
