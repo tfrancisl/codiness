@@ -7,5 +7,6 @@ in
     pyproject-nix
     uv2nix
     pyproject-build-systems
+    cpython
     ;
 }

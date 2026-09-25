@@ -1,4 +1,12 @@
 {
+  "cpython": {
+    "type": "github",
+    "owner": "python",
+    "repo": "cpython",
+    "rev": "823f0323ee6ec1402088b73bce1a38473cac36dc",
+    "narHash": "sha256-NaLBOxFZv3zljyREKrDUw7UBx3iUabNybAZHhc+CgJc=",
+    "lastModified": 1785925789
+  },
   "nixpkgs": {
     "type": "github",
     "owner": "NixOS",

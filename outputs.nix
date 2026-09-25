@@ -3,6 +3,7 @@
   pyproject-nix,
   uv2nix,
   pyproject-build-systems,
+  cpython,
   ...
 }:
 let
@@ -71,5 +72,8 @@ in
 
   packages = forAllSystems (system: {
     default = pythonSets.${system}.mkVirtualEnv "hello-world-env" workspace.deps.default;
+    corpus = nixpkgs.legacyPackages.${system}.callPackage ./corpus.nix {
+      sources = { inherit nixpkgs cpython; };
+    };
   });
 }

@@ -1,0 +1,153 @@
+# Real code sliced out of pinned sources (see .tack/pins.toml); nothing here is
+# copied into the repo. Build with:
+#   nix-build -A packages.x86_64-linux.corpus -o corpus/snippets
+#
+# id       output file is <id>.<extension of path>
+# pin      name of a tack pin
+# path     file inside the pin
+# lines    optional [first, last]; the whole file if absent
+# dedent   optional number of leading spaces to strip from every line
+# license  of the source file, for reference
+# sha256   of the extracted text, so a moved pin or line range fails the build
+
+[[snippet]]
+id = "nixpkgs_hello"
+pin = "nixpkgs"
+path = "pkgs/by-name/he/hello/package.nix"
+license = "MIT"
+sha256 = "cb8af5ebf983639dc0714cb0ab7fca1888285b0fe3d69d063b7d4d3a10cb9c47"
+
+[[snippet]]
+id = "nixpkgs_ripgrep"
+pin = "nixpkgs"
+path = "pkgs/by-name/ri/ripgrep/package.nix"
+license = "MIT"
+sha256 = "9984bdef15100ee442e7019aff7f03a52d97785eae8ef9c1540c0b59aa68d271"
+
+[[snippet]]
+id = "nixpkgs_lib_find_first"
+pin = "nixpkgs"
+path = "lib/lists.nix"
+lines = [648, 670]
+dedent = 2
+license = "MIT"
+sha256 = "ff616dc23817f15c14601857d78bf64c01cd1561177141aac66ce52f0b10bfff"
+
+[[snippet]]
+id = "nixpkgs_lib_group_by"
+pin = "nixpkgs"
+path = "lib/lists.nix"
+lines = [1027, 1041]
+dedent = 2
+license = "MIT"
+sha256 = "555e8958545152ada565006b74e64d896f7476c47d86e8951c636db4e2bbaa14"
+
+[[snippet]]
+id = "nixpkgs_lib_escape_shell_arg"
+pin = "nixpkgs"
+path = "lib/strings.nix"
+lines = [1219, 1234]
+dedent = 2
+license = "MIT"
+sha256 = "ef4470b666adc2004ecdf0477c8e81ad3204627b1a07decec4fc069cfb1f1fde"
+
+[[snippet]]
+id = "nixpkgs_lib_warn"
+pin = "nixpkgs"
+path = "lib/trivial.nix"
+lines = [867, 887]
+dedent = 2
+license = "MIT"
+sha256 = "3f9a1cb737c86fae8147746931cd9cfddd9014625733b8d5302489c9f49cf49f"
+
+[[snippet]]
+id = "nixpkgs_lib_list_files_recursive"
+pin = "nixpkgs"
+path = "lib/filesystem.nix"
+lines = [233, 242]
+dedent = 2
+license = "MIT"
+sha256 = "f60c717dfd785aea1f5dea5489609deb770701d50a8d2012f63ffbe35cce1e5a"
+
+[[snippet]]
+id = "nixpkgs_lib_to_hex_string"
+pin = "nixpkgs"
+path = "lib/trivial.nix"
+lines = [1274, 1286]
+dedent = 2
+license = "MIT"
+sha256 = "4821dba802639014138644d9864102c5b583e62f6d54869b78498e8755fe73d8"
+
+[[snippet]]
+id = "nixpkgs_lib_trace_if"
+pin = "nixpkgs"
+path = "lib/debug.nix"
+lines = [78, 80]
+dedent = 2
+license = "MIT"
+sha256 = "0a0aecb84bcf9706a4f4ab7acb0b44ea02c577c8a810545cf5da21316a4c1bca"
+
+[[snippet]]
+id = "cpython_heapq_siftdown"
+pin = "cpython"
+path = "Lib/heapq.py"
+lines = [221, 233]
+license = "PSF-2.0"
+sha256 = "5a3bd7628494fcb72968a0018cce3e3d94e6066fa611feb012520151cd11d876"
+
+[[snippet]]
+id = "cpython_random_shuffle"
+pin = "cpython"
+path = "Lib/random.py"
+lines = [356, 363]
+dedent = 4
+license = "PSF-2.0"
+sha256 = "2baf30201cbdc5d7f821ea3ced7ac6b22a707bf53584d6806e19e7ba57841f46"
+
+[[snippet]]
+id = "cpython_os_makedirs"
+pin = "cpython"
+path = "Lib/os.py"
+lines = [211, 241]
+license = "PSF-2.0"
+sha256 = "49659c1b327e84b208196e23c07842f8f2a798d1ccab03a1d729486f979f2489"
+
+[[snippet]]
+id = "cpython_colorsys_rgb_to_hsv"
+pin = "cpython"
+path = "Lib/colorsys.py"
+lines = [125, 143]
+license = "PSF-2.0"
+sha256 = "1eb8d9ebc9392d4cb08cd19bea6039542631e6996b1d718577751a09eb2e0e04"
+
+[[snippet]]
+id = "cpython_textwrap_dedent"
+pin = "cpython"
+path = "Lib/textwrap.py"
+lines = [416, 444]
+license = "PSF-2.0"
+sha256 = "d4473e6188ae8a11ae3400ee99ca11501d7a8c1a0e5945c7a3a35660cc1b1b2a"
+
+[[snippet]]
+id = "cpython_statistics_median"
+pin = "cpython"
+path = "Lib/statistics.py"
+lines = [327, 348]
+license = "PSF-2.0"
+sha256 = "a080def79e00b8e0ebfc97c939f0de4da98ffc4e0f2175b3368d5f4a7e4626d5"
+
+[[snippet]]
+id = "cpython_shutil_copyfile"
+pin = "cpython"
+path = "Lib/shutil.py"
+lines = [283, 353]
+license = "PSF-2.0"
+sha256 = "a7e38ef53c0d56bd6663079d844e4336a505039bf0667934640652513fa32bdb"
+
+[[snippet]]
+id = "cpython_tempfile_mkdtemp"
+pin = "cpython"
+path = "Lib/tempfile.py"
+lines = [357, 399]
+license = "PSF-2.0"
+sha256 = "25a48bb3b0cbdba76a78340106c1153fe7116e460462f36d4fe469be273cd09b"
